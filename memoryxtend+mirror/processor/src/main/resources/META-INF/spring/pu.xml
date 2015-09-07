@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:os-core="http://www.openspaces.org/schema/core"
+       xmlns:blob-store="http://www.openspaces.org/schema/blob-store"
+       xmlns:os-gateway="http://www.openspaces.org/schema/core/gateway"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.1.xsd
+       http://www.openspaces.org/schema/core/gateway http://www.openspaces.org/schema/10.0/core/gateway/openspaces-gateway.xsd
+       http://www.openspaces.org/schema/core http://www.openspaces.org/schema/10.2/core/openspaces-core.xsd
+       http://www.openspaces.org/schema/blob-store http://www.openspaces.org/schema/10.2/blob-store/openspaces-blobstore.xsd">
+
+    <!--
+        Spring property configurer which allows us to use system properties (such as user.name).
+    -->
+
+    <bean id="propertiesConfigurer" class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+        <property name="properties">
+            <props>
+                <prop key="dataGridName">wanSpaceDE</prop>
+                <prop key="devices">[/dev/xvdf,/dev/xvdg]</prop>
+            </props>
+        </property>
+    </bean>
+
+    <!--
+        Enables the usage of @GigaSpaceContext annotation based injection.
+    -->
+    <os-core:giga-space-context/>
+
+    <!--
+        A JDBC pooled data source that connects to the HSQL server the mirror starts.
+    -->
+    <bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource" destroy-method="close">
+        <property name="driverClassName" value="org.apache.derby.jdbc.ClientDriver"/>
+        <property name="url" value="jdbc:derby://localhost/db_test;user=APP;pass=APP"/>
+        <property name="username" value="sa"/>
+        <property name="password" value=" "/>
+    </bean>
+
+    <!--
+        Hibernate SessionFactory bean. Uses the pooled data source to connect to the database.
+    -->
+    <bean id="sessionFactory" class="org.springframework.orm.hibernate4.LocalSessionFactoryBean">
+        <property name="dataSource" ref="dataSource"/>
+        <property name="annotatedClasses">
+            <list>
+                <value>com.mycompany.app.common.Data</value>
+            </list>
+        </property>
+        <property name="hibernateProperties">
+            <props>
+                <prop key="hibernate.dialect">org.hibernate.dialect.DerbyTenSevenDialect</prop>
+                <prop key="hibernate.cache.provider_class">org.hibernate.cache.NoCacheProvider</prop>
+                <prop key="hibernate.cache.use_second_level_cache">false</prop>
+                <prop key="hibernate.cache.use_query_cache">false</prop>
+            </props>
+        </property>
+    </bean>
+
+    <bean id="hibernateSpaceDataSource" class="org.openspaces.persistency.hibernate.DefaultHibernateSpaceDataSourceFactoryBean">
+        <property name="sessionFactory" ref="sessionFactory"/>
+        <property name="initialLoadChunkSize" value="2000"/>
+    </bean>
+
+    <!--
+        A bean representing a space (an IJSpace implementation).
+
+        Note, we do not specify here the cluster topology of the space. It is declated outside of
+        the processing unit or within the SLA bean.
+
+        The space is configured to connect to a mirror, and uses the configured external data source
+        to perform the initial load operation f/hibernateSpaceDataSourcerom the database when the Space starts up.
+    -->
+    <os-core:space id="space" url="/./wanSpaceDE" schema="persistent"
+                   mirror="true" space-data-source="hibernateSpaceDataSource" >
+        <os-core:blob-store-data-policy  blob-store-handler="myBlobStore" cache-entries-percentage="100"
+                                         avg-object-size-KB="10" persistent="true"  />
+        <os-core:properties>
+            <props>
+                <!-- Use ALL IN CACHE -->
+                <prop key="space-config.engine.cache_policy">1</prop>
+                <prop key="space-config.external-data-source.usage">read-only</prop>
+                <prop key="cluster-config.cache-loader.external-data-source">true</prop>
+                <prop key="cluster-config.cache-loader.central-data-source">true</prop>
+            </props>
+        </os-core:properties>
+    </os-core:space>
+
+    <blob-store:sandisk-blob-store id="myBlobStore" blob-store-capacity-GB="40" blob-store-cache-size-MB="100"
+                                   devices="${devices}" volume-dir="/tmp/data${clusterInfo.runningNumber}" durability-level="SW_CRASH_SAFE" central-storage="true">
+    </blob-store:sandisk-blob-store>
+
+    <!--
+        Defines a distributed transaction manager.
+    -->
+     <os-core:distributed-tx-manager id="transactionManager"/>
+
+    <!--
+        OpenSpaces simplified space API built on top of IJSpace/JavaSpace.
+    -->
+    <os-core:giga-space id="gigaSpace" space="space" tx-manager="transactionManager"/>
+
+</beans>
